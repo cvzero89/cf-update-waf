@@ -1,0 +1,15 @@
+zone_id: <zone_id>
+dry_run: false  
+rules:
+  - name: "Rule name"
+    uri: "https://example.com/*"
+    field: "http.request.full_uri wildcard"
+    allowed_ips:
+      - "x.x.x.x"
+      - "x.x.x.x"
+  - name: "Rule name 2"
+    uri: "https://another.example.com/*"
+    field: "http.request.uri.path strict wildcard"
+    allowed_ips:
+      - "x.x.x.x"
+      - "x.x.x.x"
