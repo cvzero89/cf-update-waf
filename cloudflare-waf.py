@@ -2,13 +2,27 @@ import os
 import sys
 import yaml
 import requests
+import logging
+from logging.handlers import RotatingFileHandler
 from dotenv import load_dotenv
 import cloudflare
 from cloudflare import Cloudflare
 
+def setup_logging(log_file, log_level, max_log_size, backup_count):
+    numeric_level = getattr(logging, log_level.upper(), logging.INFO)
+    log_file_location = f'{os.path.abspath(os.path.dirname(__file__))}/{log_file}'
+    handler = RotatingFileHandler(log_file_location, maxBytes=max_log_size, backupCount=backup_count)
+    handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+
+    logging.basicConfig(
+        level=numeric_level,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        handlers=[handler, logging.StreamHandler()]
+    )
+
 load_dotenv()
 API_TOKEN = os.getenv("CF_API_TOKEN")
-CONFIG_FILE = "config.yaml"
+CONFIG_FILE = f"{os.path.abspath(os.path.dirname(__file__))}/config.yaml"
 
 if not API_TOKEN:
     print("❌ CF_API_TOKEN not found in environment. Please set it in a .env file.")
@@ -36,11 +50,11 @@ def find_rule_by_name(rules, name):
             return rule
     return None
 
-def build_expression(allowed_ips, uri_path, field):
+def build_expression(allowed_ips, uri_path, field, gluetun_vpn_host):
     uri_check = f'({field} r"{uri_path}")'
     if current_ip := get_current_ip():
         allowed_ips.append(current_ip)
-    if current_ip_vpn := get_current_vpn_ip('dum-e:8000'):
+    if current_ip_vpn := get_current_vpn_ip(gluetun_vpn_host):
         allowed_ips.append(current_ip_vpn)
     ip_check = f"(ip.src in {{{' '.join(allowed_ips)}}})"
     return f"{uri_check} and not {ip_check}"
@@ -76,14 +90,16 @@ def create_waf_rule(ruleset_id, zone_id, expression, name, dry_run):
                                 description=name,
                                 enabled=True)
         print("✅ Rule created.")
+        logging.info(f"Created rule: {name} with expression: {expression}.")
     except cloudflare.APIConnectionError as ErrConnection:
         print("❌ Error creating rule:", ErrConnection)
+        logging.error(f"Failed to create rule: {ErrConnection}.")
     except cloudflare.RateLimitError as ErrRate:
-        print("❌ Error creating rule:", ErrConnection)
+        print("❌ Error creating rule:", ErrRate)
+        logging.error(f"Failed to create rule: {ErrRate}.")
     except cloudflare.APIStatusError as ErrStatus:
-        print("Another non-200-range status code was received")
-        print(ErrStatus.status_code)
-        print(ErrStatus.response)
+        print(f"Another non-200-range status code was received. Status code: {ErrStatus.status_code}, {ErrStatus.response}")
+        logging.error(f"Failed to create rule: {ErrStatus}.")
 
 def update_waf_rule(ruleset_id, zone_id, active_rule, expression, dry_run):
     print(f"✏️ Updating rule: {active_rule.description}")
@@ -99,45 +115,51 @@ def update_waf_rule(ruleset_id, zone_id, active_rule, expression, dry_run):
                                description=active_rule.description,
                                enabled=True)
         print("✅ Rule updated.")
+        logging.info(f"Updated rule: {active_rule.description} with expression: {expression}.")
     except cloudflare.APIConnectionError as ErrConnection:
         print("❌ Error creating rule:", ErrConnection)
+        logging.error(f"Failed to create rule: {ErrConnection}.")
     except cloudflare.RateLimitError as ErrRate:
-        print("❌ Error creating rule:", ErrConnection)
+        print("❌ Error creating rule:", ErrRate)
+        logging.error(f"Failed to create rule: {ErrRate}.")
     except cloudflare.APIStatusError as ErrStatus:
-        print("Another non-200-range status code was received")
-        print(ErrStatus.status_code)
-        print(ErrStatus.response)
+        print(f"Another non-200-range status code was received. Status code: {ErrStatus.status_code}, {ErrStatus.response}")
+        logging.error(f"Failed to create rule: {ErrStatus}.")
 
 def process_rules(config):
     zone_id = config.get("zone_id", None)
     dry_run = config.get("dry_run", True)
     rules_config = config.get("rules", [])
-
+    gluetun_vpn_host = config.get("gluetun_vpn_host", None)
     if not zone_id or not rules_config:
         print("Invalid config: zone and rules are required.")
+        logging.warning("Invalid config: zone and rules are required.")
         return
     ruleset_id = waf_rules_id(zone_id)
     rulesets = get_rules(zone_id, ruleset_id)
-
+    logging.info(f"Processing rules for {zone_id}. Number of rules: {len(rules_config)}.")
     for rule_definition in rules_config:
         name = rule_definition["name"]
         uri = rule_definition["uri"]
         ips = rule_definition["allowed_ips"]
         field = rule_definition["field"]
-        expression = build_expression(ips, uri, field)
+        expression = build_expression(ips, uri, field, gluetun_vpn_host)
         active_rule = find_rule_by_name(rulesets, name)
-
         if active_rule:
             update_waf_rule(ruleset_id, zone_id, active_rule, expression, dry_run)
         else:
             create_waf_rule(ruleset_id, zone_id, expression, name, uri, ips, dry_run)
 
 def main():
+    _version = 'v0.2'
     config = load_config()
+    setup_logging(config["logging"]["log_file"], config["logging"]["log_level"], config["logging"]["max_log_size"], config["logging"]["backup_count"])
+    logging.info(f"Configuration loaded! Script version: {_version}")
     try:
         process_rules(config)
     except Exception as e:
-        print("❌ Fatal error:", e)
+        print(f"❌ Fatal error: {e}")
+        logging.error(f"❌ Fatal error: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
