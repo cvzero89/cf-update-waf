@@ -50,15 +50,27 @@ def find_rule_by_name(rules, name):
             return rule
     return None
 
-def build_expression(allowed_ips, uri_path, field, gluetun_vpn_host):
-    uri_check = f'({field} r"{uri_path}")'
-    if current_ip := get_current_ip():
-        allowed_ips.append(current_ip)
-    if current_ip_vpn := get_current_vpn_ip(gluetun_vpn_host):
-        allowed_ips.append(current_ip_vpn)
-    ip_check = f"(ip.src in {{{' '.join(allowed_ips)}}})"
-    return f"{uri_check} and not {ip_check}"
+def build_expression(allowed_ips, allowed_hostnames, uri_path, field, gluetun_vpn_host):
+    uri_check = f'{field} r"{uri_path}"'
+    ip_check = None
+    host_check = None
 
+    if allowed_ips:
+        if current_ip := get_current_ip():
+            allowed_ips.append(current_ip)
+        if current_ip_vpn := get_current_vpn_ip(gluetun_vpn_host):
+            allowed_ips.append(current_ip_vpn)
+        ip_check = f"ip.src in {{{' '.join(allowed_ips)}}}"
+    if allowed_hostnames:
+        hostnames = ' '.join(f'"{host}"' for host in allowed_hostnames)
+        host_check = f"http.host in {{{hostnames}}}"
+    if ip_check and host_check:
+        return f"({uri_check} and not {ip_check}) or ({uri_check} and not {host_check})"
+    if ip_check and not host_check:
+        return f"({uri_check} and not {ip_check})"
+    if host_check and not ip_check:
+    	return f"({uri_check} and not {host_check})"
+    
 def get_current_ip():
     try:
         response = requests.get("https://api.ipify.org?format=json")
@@ -141,9 +153,16 @@ def process_rules(config):
     for rule_definition in rules_config:
         name = rule_definition["name"]
         uri = rule_definition["uri"]
-        ips = rule_definition["allowed_ips"]
+        if rule_definition["block_ip"]["enabled"] is True:
+            ips = rule_definition["block_ip"]["allowed_ips"]
+        else:
+            ips = None
+        if rule_definition["block_hostname"]["enabled"] is True:
+            hostnames = rule_definition["block_hostname"]["allowed_hostnames"]
+        else:
+            hostnames = None
         field = rule_definition["field"]
-        expression = build_expression(ips, uri, field, gluetun_vpn_host)
+        expression = build_expression(ips, hostnames, uri, field, gluetun_vpn_host)
         active_rule = find_rule_by_name(rulesets, name)
         if active_rule:
             update_waf_rule(ruleset_id, zone_id, active_rule, expression, dry_run)

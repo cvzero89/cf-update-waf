@@ -5,15 +5,32 @@ rules:
   - name: "Rule name"
     uri: "https://example.com/*"
     field: "http.request.full_uri wildcard"
-    allowed_ips:
-      - "x.x.x.x"
-      - "x.x.x.x"
+    block_ip:
+      enabled: true
+      allowed_ips:
+        - "x.x.x.x"
+        - "x.x.x.x/x"
+    block_hostname:
+      enabled: true
+      allowed_hostnames:
+        - "acme-v01.api.letsencrypt.org"
+        - "acme-staging.api.letsencrypt.org"
+        - "acme-v02.api.letsencrypt.org"
+        - "acme-staging-v02.api.letsencrypt.org"
+        - "example.com" ## Must allow referrals from the own domain
+
   - name: "Rule name 2"
     uri: "https://another.example.com/*"
     field: "http.request.uri.path strict wildcard"
-    allowed_ips:
-      - "x.x.x.x"
-      - "x.x.x.x"
+    block_ip:
+      enabled: true
+      allowed_ips:
+        - "x.x.x.x"
+        - "x.x.x.x/x"
+    block_hostname:
+      enabled: false
+      allowed_hostnames:
+        - ""
 logging:
   log_file: "cloudflare-waf.log"
   log_level: "INFO"  # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
